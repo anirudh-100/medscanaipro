@@ -1,16 +1,20 @@
 import { forwardRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ConfidenceBar } from "./ConfidenceBar";
-import { Activity, AlertCircle, TrendingUp } from "lucide-react";
+import { Activity, AlertCircle, TrendingUp, Download, Save } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { generatePDFReport } from "@/utils/pdfExport";
 import type { Prediction } from "@/hooks/useClassifier";
 
 interface ResultAnalysisProps {
   predictions: Prediction[];
   isProcessing: boolean;
+  onSave?: () => void;
+  canSave?: boolean;
 }
 
 export const ResultAnalysis = forwardRef<HTMLDivElement, ResultAnalysisProps>(
-  ({ predictions, isProcessing }, ref) => {
+  ({ predictions, isProcessing, onSave, canSave = false }, ref) => {
     const hasPredictions = predictions.length > 0;
     const topPrediction = predictions[0];
 
@@ -20,6 +24,16 @@ export const ResultAnalysis = forwardRef<HTMLDivElement, ResultAnalysisProps>(
       return { text: "Low Confidence", color: "text-confidence-low" };
     };
 
+    const handleExportPDF = () => {
+      if (predictions.length > 0) {
+        generatePDFReport({
+          predictions,
+          timestamp: new Date(),
+          scanType: "camera",
+        });
+      }
+    };
+
     return (
       <motion.div
         ref={ref}
@@ -27,11 +41,27 @@ export const ResultAnalysis = forwardRef<HTMLDivElement, ResultAnalysisProps>(
         animate={{ opacity: 1, y: 0 }}
         className="medical-card p-5 space-y-5"
       >
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-            <Activity className="h-4 w-4 text-primary" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+              <Activity className="h-4 w-4 text-primary" />
+            </div>
+            <h3 className="font-semibold text-foreground">Result Analysis</h3>
           </div>
-          <h3 className="font-semibold text-foreground">Result Analysis</h3>
+          {hasPredictions && (
+            <div className="flex items-center gap-2">
+              {canSave && onSave && (
+                <Button variant="outline" size="sm" onClick={onSave}>
+                  <Save className="h-4 w-4 mr-1" />
+                  Save
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={handleExportPDF}>
+                <Download className="h-4 w-4 mr-1" />
+                PDF
+              </Button>
+            </div>
+          )}
         </div>
 
         <AnimatePresence mode="wait">
