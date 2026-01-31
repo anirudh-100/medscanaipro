@@ -20,10 +20,18 @@ export const CameraInput = forwardRef<HTMLDivElement, CameraInputProps>(
     const streamRef = useRef<MediaStream | null>(null);
     const [isCameraActive, setIsCameraActive] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
+    const [isInitializing, setIsInitializing] = useState(false);
 
     const startCamera = useCallback(async () => {
       try {
         setCameraError(null);
+        setIsInitializing(true);
+        
+        // Check if mediaDevices is available
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error("Camera not supported in this browser");
+        }
+        
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "environment",
@@ -35,11 +43,31 @@ export const CameraInput = forwardRef<HTMLDivElement, CameraInputProps>(
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           streamRef.current = stream;
-          setIsCameraActive(true);
+          
+          // Wait for video to be ready
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current?.play().then(() => {
+              setIsCameraActive(true);
+              setIsInitializing(false);
+            }).catch((err) => {
+              console.error("Error playing video:", err);
+              setIsInitializing(false);
+            });
+          };
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Camera access error:", err);
-        setCameraError("Unable to access camera. Please grant camera permissions.");
+        setIsInitializing(false);
+        
+        if (err.name === "NotAllowedError") {
+          setCameraError("Camera access denied. Please grant camera permissions in your browser settings.");
+        } else if (err.name === "NotFoundError") {
+          setCameraError("No camera found. Please connect a camera and try again.");
+        } else if (err.name === "NotSupportedError" || err.message?.includes("not supported")) {
+          setCameraError("Camera is not supported in this browser. Try using Chrome or Firefox.");
+        } else {
+          setCameraError(`Unable to access camera: ${err.message || "Unknown error"}`);
+        }
       }
     }, []);
 
@@ -57,18 +85,22 @@ export const CameraInput = forwardRef<HTMLDivElement, CameraInputProps>(
     }, [onStopCamera, onStopScan]);
 
     const captureFrame = useCallback(() => {
-      if (videoRef.current && canvasRef.current) {
+      if (videoRef.current && canvasRef.current && isCameraActive) {
         const video = videoRef.current;
         const canvas = canvasRef.current;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(video, 0, 0);
-          onCapture(canvas);
+        
+        // Ensure video has valid dimensions
+        if (video.videoWidth > 0 && video.videoHeight > 0) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(video, 0, 0);
+            onCapture(canvas);
+          }
         }
       }
-    }, [onCapture]);
+    }, [onCapture, isCameraActive]);
 
     const handleVideoPlay = useCallback(() => {
       if (videoRef.current) {
@@ -110,12 +142,17 @@ export const CameraInput = forwardRef<HTMLDivElement, CameraInputProps>(
         </div>
 
         <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-muted">
-          {!isCameraActive ? (
+          {!isCameraActive && !isInitializing ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-secondary">
                 <CameraOff className="h-7 w-7 text-muted-foreground" />
               </div>
               <p className="text-sm text-muted-foreground">Camera not active</p>
+            </div>
+          ) : isInitializing ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+              <div className="h-10 w-10 border-2 border-muted border-t-primary rounded-full animate-spin" />
+              <p className="text-sm text-muted-foreground">Starting camera...</p>
             </div>
           ) : (
             <>
@@ -130,7 +167,7 @@ export const CameraInput = forwardRef<HTMLDivElement, CameraInputProps>(
               {isScanning && (
                 <div className="absolute inset-0 pointer-events-none">
                   <div className="absolute inset-3 border-2 border-primary/40 rounded-lg" />
-                  <div className="absolute inset-3 top-0 h-1 bg-primary/60 rounded-full animate-scan-line" />
+                  <div className="absolute inset-3 scan-line h-1 animate-scan-line" />
                   <div className="absolute top-3 left-3 w-6 h-6 border-l-2 border-t-2 border-primary rounded-tl" />
                   <div className="absolute top-3 right-3 w-6 h-6 border-r-2 border-t-2 border-primary rounded-tr" />
                   <div className="absolute bottom-3 left-3 w-6 h-6 border-l-2 border-b-2 border-primary rounded-bl" />
@@ -141,8 +178,8 @@ export const CameraInput = forwardRef<HTMLDivElement, CameraInputProps>(
           )}
 
           {cameraError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-destructive/10 backdrop-blur-sm">
-              <p className="text-sm text-destructive text-center px-4">{cameraError}</p>
+            <div className="absolute inset-0 flex items-center justify-center bg-destructive/10 backdrop-blur-sm p-4">
+              <p className="text-sm text-destructive text-center">{cameraError}</p>
             </div>
           )}
 
@@ -151,9 +188,14 @@ export const CameraInput = forwardRef<HTMLDivElement, CameraInputProps>(
 
         <div className="flex gap-2">
           {!isCameraActive ? (
-            <Button onClick={startCamera} disabled={!isModelReady} className="flex-1" size="lg">
+            <Button 
+              onClick={startCamera} 
+              disabled={!isModelReady || isInitializing} 
+              className="flex-1" 
+              size="lg"
+            >
               <Camera className="h-4 w-4 mr-2" />
-              Start Camera
+              {isInitializing ? "Starting..." : "Start Camera"}
             </Button>
           ) : (
             <>
@@ -179,7 +221,7 @@ export const CameraInput = forwardRef<HTMLDivElement, CameraInputProps>(
                   </>
                 )}
               </Button>
-              <Button onClick={captureFrame} variant="outline" size="lg">
+              <Button onClick={captureFrame} variant="outline" size="lg" title="Capture Frame">
                 <Maximize2 className="h-4 w-4" />
               </Button>
             </>
