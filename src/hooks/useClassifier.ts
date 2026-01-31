@@ -13,6 +13,7 @@ export function useClassifier() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   const animationFrameRef = useRef<number | null>(null);
   const isClassifyingRef = useRef(false);
 
@@ -40,23 +41,53 @@ export function useClassifier() {
 
   const classify = useCallback(
     async (element: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement) => {
-      if (!model || isClassifyingRef.current) return;
+      if (!model || isClassifyingRef.current) return null;
       
       try {
         isClassifyingRef.current = true;
+        setIsProcessing(true);
         const result = await model.predict(element);
-        setPredictions(
-          result
-            .map((p) => ({
-              className: p.className,
-              probability: p.probability,
-            }))
-            .sort((a, b) => b.probability - a.probability)
-        );
+        const sortedPredictions = result
+          .map((p) => ({
+            className: p.className,
+            probability: p.probability,
+          }))
+          .sort((a, b) => b.probability - a.probability);
+        
+        setPredictions(sortedPredictions);
+        return sortedPredictions;
       } catch (err) {
         console.error("Classification error:", err);
+        return null;
       } finally {
         isClassifyingRef.current = false;
+        setIsProcessing(false);
+      }
+    },
+    [model]
+  );
+
+  const classifyImage = useCallback(
+    async (imageElement: HTMLImageElement) => {
+      if (!model) return null;
+      
+      setIsProcessing(true);
+      try {
+        const result = await model.predict(imageElement);
+        const sortedPredictions = result
+          .map((p) => ({
+            className: p.className,
+            probability: p.probability,
+          }))
+          .sort((a, b) => b.probability - a.probability);
+        
+        setPredictions(sortedPredictions);
+        return sortedPredictions;
+      } catch (err) {
+        console.error("Classification error:", err);
+        return null;
+      } finally {
+        setIsProcessing(false);
       }
     },
     [model]
@@ -65,7 +96,7 @@ export function useClassifier() {
   const startContinuousClassification = useCallback(
     (videoElement: HTMLVideoElement) => {
       const loop = async () => {
-        if (videoElement.readyState === 4) {
+        if (videoElement.readyState === 4 && !isClassifyingRef.current) {
           await classify(videoElement);
         }
         animationFrameRef.current = requestAnimationFrame(loop);
@@ -82,6 +113,10 @@ export function useClassifier() {
     }
   }, []);
 
+  const clearPredictions = useCallback(() => {
+    setPredictions([]);
+  }, []);
+
   useEffect(() => {
     return () => {
       stopContinuousClassification();
@@ -93,9 +128,12 @@ export function useClassifier() {
     isLoading,
     error,
     predictions,
+    isProcessing,
     classify,
+    classifyImage,
     startContinuousClassification,
     stopContinuousClassification,
+    clearPredictions,
     isReady: !!model && !isLoading,
   };
 }
